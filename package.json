@@ -1,0 +1,57 @@
+{
+	"name": "seat-shuffler",
+	"version": "0.1.0",
+	"description": "자리바꾸기 Electron app",
+	"desktopName": "SeatChanger",
+	"main": "src/main/main.js",
+	"scripts": {
+		"start": "electron .",
+		"dev": "electron .",
+		"check": "node -c src/main/main.js && node -c src/preload/preload.js && node -c src/renderer/scripts/app.js && node -c src/renderer/scripts/seats.js && node -c src/renderer/scripts/storage.js && node -c src/renderer/scripts/ui.js",
+		"pack": "electron-builder --dir",
+		"dist": "electron-builder",
+		"dist:linux": "electron-builder --linux AppImage deb",
+		"dist:win": "electron-builder --win zip"
+	},
+	"keywords": [
+		"electron",
+		"seat",
+		"classroom"
+	],
+	"homepage": "https://kljj04.me",
+	"author": {
+		"name": "kljj04",
+		"email": "kljj04@kljj04.me"
+	},
+	"license": "MIT",
+	"build": {
+		"appId": "me.kljj04.seatchanger",
+		"productName": "SeatChanger",
+		"artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+		"directories": {
+			"output": "dist"
+		},
+		"files": [
+			"src/**/*",
+			"package.json"
+		],
+		"linux": {
+			"category": "Education",
+			"maintainer": "kljj04 <kljj04@kljj04.me>",
+			"syncDesktopName": true,
+			"target": [
+				"AppImage",
+				"deb"
+			]
+		},
+		"win": {
+			"target": [
+				"zip"
+			]
+		}
+	},
+	"devDependencies": {
+		"electron": "^31.7.7",
+		"electron-builder": "^26.15.3"
+	}
+}
