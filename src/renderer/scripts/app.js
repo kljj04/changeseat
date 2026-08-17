@@ -31,7 +31,10 @@ const elements = {
 	viewerZoomOutButton: document.querySelector('#viewerZoomOutButton'),
 	viewerZoomInButton: document.querySelector('#viewerZoomInButton'),
 	viewerZoomResetButton: document.querySelector('#viewerZoomResetButton'),
+	maximizeViewerButton: document.querySelector('#maximizeViewerButton'),
 	closeViewerButton: document.querySelector('#closeViewerButton'),
+	flashAfterShuffleInput: document.querySelector('#flashAfterShuffleInput'),
+	autoSaveGalleryInput: document.querySelector('#autoSaveGalleryInput'),
 
 	quickClassName: document.querySelector('#quickClassName'),
 	quickAddClassButton: document.querySelector('#quickAddClassButton'),
@@ -50,6 +53,9 @@ const elements = {
 	changerClassSelect: document.querySelector('#changerClassSelect'),
 	changerStudentCount: document.querySelector('#changerStudentCount'),
 	changerSeatCount: document.querySelector('#changerSeatCount'),
+	rowCountInput: document.querySelector('#rowCountInput'),
+	colCountInput: document.querySelector('#colCountInput'),
+	applyLayoutButton: document.querySelector('#applyLayoutButton'),
 	shuffleButton: document.querySelector('#shuffleButton'),
 	saveButton: document.querySelector('#saveButton'),
 	loadButton: document.querySelector('#loadButton'),
@@ -75,6 +81,10 @@ let state = {
 	zoom: 1,
 	photoZoom: 1,
 	changerPanelOpen: true,
+	settings: {
+		flashAfterShuffle: false,
+		autoSaveGallery: false,
+	},
 };
 
 let selectedIndex = -1;
@@ -82,6 +92,7 @@ let swapIndex = -1;
 let drag = null;
 let pendingPhoto = null;
 let viewerPhotoId = null;
+let viewerMaximized = false;
 let saveTimer = null;
 
 function activeClass() {
@@ -147,6 +158,8 @@ async function savePermanentData() {
 			currentClassId: state.currentClassId,
 			gallery: state.gallery,
 			zoom: state.zoom,
+			flashAfterShuffle: state.settings.flashAfterShuffle,
+			autoSaveGallery: state.settings.autoSaveGallery,
 		}));
 	} catch (error) {
 		setMessage(elements.message, `자동 저장 실패: ${error.message}`, 'error');
@@ -172,6 +185,10 @@ async function loadPermanentData() {
 	state.currentClassId = loaded.currentClassId;
 	state.gallery = loaded.gallery || [];
 	state.zoom = loaded.zoom || 1;
+	state.settings = {
+		...state.settings,
+		...(loaded.settings || {}),
+	};
 }
 
 function setZoom(value) {
@@ -309,13 +326,19 @@ async function shuffleSeats() {
 		document.body.classList.add('shuffling-text');
 		await animateShuffle(classroom, finalSeats);
 		renderAll();
-		document.body.classList.add('shutter-on');
-		document.body.classList.add('screen-captured');
-		await sleep(620);
 		document.body.classList.remove('shuffling-text');
-		document.body.classList.remove('shutter-on');
-		document.body.classList.remove('screen-captured');
-		await openCapturePrompt(classroom);
+
+		if (state.settings.flashAfterShuffle) {
+			document.body.classList.add('shutter-on');
+			document.body.classList.add('screen-captured');
+			await sleep(360);
+			document.body.classList.remove('shutter-on');
+			document.body.classList.remove('screen-captured');
+		}
+
+		if (state.settings.autoSaveGallery) {
+			saveGallerySnapshot(classroom);
+		}
 
 		setMessage(elements.message, '자리 배치 완료.', 'success');
 		markDirty();
@@ -330,31 +353,185 @@ async function shuffleSeats() {
 }
 
 async function animateShuffle(classroom, finalSeats) {
-	const original = classroom.seats.map((seat) => ({ ...seat }));
+	const movableIndexes = getMovableFilledIndexes(classroom.seats);
+	const steps = movableIndexes.length < 2 ? 0 : randomInteger(8, 11);
+	const startDelay = randomInteger(260, 320);
+	const endDelay = randomInteger(420, 560);
+	let queue = shuffle(movableIndexes);
 
-	for (let step = 0; step < 12; step += 1) {
-		const shuffled = shuffle(getShufflePool(classroom));
-		let cursor = 0;
+	for (let step = 0; step < steps; step += 1) {
+		const duration = easedShuffleDelay(step, steps, startDelay, endDelay);
+		const batchSize = Math.min(randomInteger(6, 10), movableIndexes.length);
+		const indexes = takeShuffleBatch(queue, movableIndexes, batchSize);
 
-		classroom.seats = original.map((seat) => {
-			if (seat.fixed) {
-				return seat;
-			}
+		if (indexes.length < 2) {
+			await sleep(duration);
+			continue;
+		}
 
-			const picked = shuffled[cursor] || { name: '', studentNumber: null };
-			cursor += 1;
-			return {
-				...seat,
-				name: picked?.name || '',
-				studentNumber: picked?.studentNumber ?? null,
-			};
-		});
-		renderAll();
-		await sleep(240);
+		await animateSeatAssignmentPermutation(classroom, indexes, duration);
+		await sleep(45);
 	}
 
+	await animateToFinalSeats(classroom, finalSeats, randomInteger(460, 620));
 	classroom.seats = finalSeats;
 	renderAll();
+	await sleep(120);
+}
+
+function getMovableFilledIndexes(seats) {
+	return seats
+		.map((seat, index) => ({ ...seat, index }))
+		.filter((seat) => !seat.fixed && seat.name)
+		.map((seat) => seat.index);
+}
+
+function takeShuffleBatch(queue, allIndexes, batchSize) {
+	while (queue.length < batchSize && allIndexes.length > 0) {
+		queue.push(...shuffle(allIndexes));
+	}
+
+	return queue.splice(0, batchSize);
+}
+
+async function animateSeatAssignmentPermutation(classroom, indexes, duration) {
+	const targetIndexes = derangeIndexes(indexes);
+	const assignments = indexes.map((index) => ({
+		sourceIndex: index,
+		targetIndex: targetIndexes[indexes.indexOf(index)],
+		name: classroom.seats[index].name,
+		studentNumber: classroom.seats[index].studentNumber,
+	}));
+
+	await animateAssignmentClones(assignments, duration);
+
+	for (const assignment of assignments) {
+		classroom.seats[assignment.targetIndex].name = assignment.name;
+		classroom.seats[assignment.targetIndex].studentNumber = assignment.studentNumber;
+	}
+
+	renderAll();
+}
+
+function derangeIndexes(indexes) {
+	if (indexes.length < 2) {
+		return [...indexes];
+	}
+
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		const shuffled = shuffle(indexes);
+
+		if (shuffled.every((value, index) => value !== indexes[index])) {
+			return shuffled;
+		}
+	}
+
+	return [...indexes.slice(1), indexes[0]];
+}
+
+async function animateToFinalSeats(classroom, finalSeats, duration) {
+	const assignments = [];
+	const currentByStudent = new Map(
+		classroom.seats
+			.map((seat, index) => [studentKey(seat), index])
+			.filter(([key]) => key),
+	);
+
+	for (let targetIndex = 0; targetIndex < finalSeats.length; targetIndex += 1) {
+		const finalSeat = finalSeats[targetIndex];
+		const sourceIndex = currentByStudent.get(studentKey(finalSeat));
+
+		if (
+			sourceIndex === undefined ||
+			sourceIndex === targetIndex ||
+			finalSeat.fixed ||
+			!finalSeat.name
+		) {
+			continue;
+		}
+
+		assignments.push({
+			sourceIndex,
+			targetIndex,
+			name: finalSeat.name,
+			studentNumber: finalSeat.studentNumber,
+		});
+	}
+
+	await animateAssignmentClones(assignments, duration);
+}
+
+async function animateAssignmentClones(assignments, duration) {
+	const clones = [];
+	const hidden = new Set();
+	const animations = [];
+
+	for (const assignment of assignments) {
+		const sourceElement = getSeatElementByIndex(assignment.sourceIndex);
+		const targetElement = getSeatElementByIndex(assignment.targetIndex);
+
+		if (!sourceElement || !targetElement) {
+			continue;
+		}
+
+		const sourceRect = sourceElement.getBoundingClientRect();
+		const targetRect = targetElement.getBoundingClientRect();
+		const sourceWidth = sourceElement.offsetWidth || sourceRect.width || 80;
+		const sourceHeight = sourceElement.offsetHeight || sourceRect.height || 40;
+		const cloneScale = Math.max(1, sourceRect.width / sourceWidth) * 1.08;
+		const clone = sourceElement.cloneNode(true);
+		clone.classList.add('seat-shuffle-clone');
+		clone.style.left = `${sourceRect.left}px`;
+		clone.style.top = `${sourceRect.top}px`;
+		clone.style.width = `${sourceWidth}px`;
+		clone.style.height = `${sourceHeight}px`;
+		document.body.appendChild(clone);
+		clones.push(clone);
+		hidden.add(assignment.sourceIndex);
+		hidden.add(assignment.targetIndex);
+
+		animations.push(clone.animate([
+			{ transform: `translate(0, 0) scale(${cloneScale})` },
+			{ transform: `translate(${targetRect.left - sourceRect.left}px, ${targetRect.top - sourceRect.top}px) scale(${cloneScale})` },
+		], {
+			duration,
+			easing: 'cubic-bezier(.2, .9, .2, 1)',
+			fill: 'forwards',
+		}).finished.catch(() => {}));
+	}
+
+	for (const index of hidden) {
+		getSeatElementByIndex(index)?.classList.add('shuffling-hidden');
+	}
+
+	await Promise.all(animations);
+
+	for (const clone of clones) {
+		clone.remove();
+	}
+	for (const index of hidden) {
+		getSeatElementByIndex(index)?.classList.remove('shuffling-hidden');
+	}
+}
+
+function getSeatElementByIndex(index) {
+	return elements.seatCanvas.querySelector(`.seat[data-index="${index}"]`);
+}
+
+function studentKey(seat) {
+	if (!seat?.name) {
+		return '';
+	}
+
+	return `${seat.studentNumber ?? ''}:${normalizeName(seat.name)}`;
+}
+
+function easedShuffleDelay(step, steps, startDelay, endDelay) {
+	const progress = steps <= 1 ? 1 : step / (steps - 1);
+	const eased = progress * progress;
+	const jitter = randomInteger(-12, 18);
+
+	return Math.max(35, Math.round(startDelay + (endDelay - startDelay) * eased + jitter));
 }
 
 function shuffleSeatNamesWithFixed(classroom) {
@@ -365,7 +542,10 @@ function shuffleSeatNamesWithFixed(classroom) {
 	for (let attempt = 0; attempt < 180; attempt += 1) {
 		const candidate = assignShuffledPool(classroom);
 		applyPreferredPairs(candidate, constraints.preferPairs);
-		const score = countAvoidPairConflicts(candidate, constraints.avoidPairs) + countPreferPairMisses(candidate, constraints.preferPairs);
+		const score =
+			countAvoidPairConflicts(candidate, constraints.avoidPairs) +
+			countRadiusAvoidPairConflicts(candidate, constraints.radiusAvoidPairs) +
+			countPreferPairMisses(candidate, constraints.preferPairs);
 
 		if (score < bestScore) {
 			bestSeats = candidate;
@@ -383,7 +563,7 @@ function shuffleSeatNamesWithFixed(classroom) {
 }
 
 function assignShuffledPool(classroom) {
-	const pool = shuffle(getShufflePool(classroom));
+	const pool = getShuffledStudentFirstPool(classroom);
 	let cursor = 0;
 
 	return classroom.seats.map((seat) => {
@@ -406,6 +586,7 @@ function getPairConstraints(classroom) {
 	return {
 		avoidPairs: parseNamePairs(classroom.constraints?.avoidPairs),
 		preferPairs: parseNamePairs(classroom.constraints?.preferPairs),
+		radiusAvoidPairs: parseRadiusAvoidPairs(classroom.constraints?.radiusAvoidPairs),
 	};
 }
 
@@ -415,6 +596,19 @@ function parseNamePairs(rawText) {
 		.map((line) => line.split(/[,\t/|]+/).map((value) => value.trim()).filter(Boolean))
 		.filter((parts) => parts.length >= 2)
 		.map(([first, second]) => [first, second]);
+}
+
+function parseRadiusAvoidPairs(rawText) {
+	return String(rawText || '')
+		.split(/\r?\n/)
+		.map((line) => line.split(/[,\t/|]+/).map((value) => value.trim()).filter(Boolean))
+		.filter((parts) => parts.length >= 3)
+		.map(([first, second, radius]) => ({
+			first,
+			second,
+			radius: Math.max(0, Number(radius) || 0),
+		}))
+		.filter((item) => item.radius > 0);
 }
 
 function applyPreferredPairs(seats, pairs, options = {}) {
@@ -507,6 +701,38 @@ function countPreferPairMisses(seats, pairs) {
 	return count;
 }
 
+function countRadiusAvoidPairConflicts(seats, pairs) {
+	if (pairs.length === 0) {
+		return 0;
+	}
+
+	let count = 0;
+
+	for (const { first, second, radius } of pairs) {
+		const firstIndex = findSeatIndexByName(seats, first);
+		const secondIndex = findSeatIndexByName(seats, second);
+
+		if (firstIndex < 0 || secondIndex < 0) {
+			continue;
+		}
+
+		if (seatDistance(seats[firstIndex], seats[secondIndex]) <= radius) {
+			count += 1;
+		}
+	}
+
+	return count;
+}
+
+function seatDistance(first, second) {
+	const horizontalGap = 100;
+	const verticalGap = 60;
+	const dx = (Number(first?.x || 0) - Number(second?.x || 0)) / horizontalGap;
+	const dy = (Number(first?.y || 0) - Number(second?.y || 0)) / verticalGap;
+
+	return Math.hypot(dx, dy);
+}
+
 function getShufflePool(classroom) {
 	const fixedNumbers = new Set(
 		classroom.seats
@@ -518,12 +744,16 @@ function getShufflePool(classroom) {
 			.filter((seat) => seat.fixed && seat.name)
 			.map((seat) => seat.name),
 	);
-	const pool = classroom.students
+	return classroom.students
 		.map((name, index) => ({
 			name,
 			studentNumber: index + 1,
 		}))
 		.filter((student) => !fixedNumbers.has(student.studentNumber) && !fixedNames.has(student.name));
+}
+
+function getShuffledStudentFirstPool(classroom) {
+	const pool = shuffle(getShufflePool(classroom));
 	const openSeatCount = classroom.seats.filter((seat) => !seat.fixed).length;
 
 	while (pool.length < openSeatCount) {
@@ -531,6 +761,10 @@ function getShufflePool(classroom) {
 	}
 
 	return pool.slice(0, openSeatCount);
+}
+
+function randomInteger(min, max) {
+	return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 function sortSeatsForShuffle(seats) {
@@ -675,12 +909,56 @@ function deleteSelectedSeat() {
 	markDirty();
 }
 
+function applySeatLayout() {
+	const classroom = activeClass();
+
+	if (!classroom) {
+		setMessage(elements.message, '선택된 반이 없음.', 'error');
+		return;
+	}
+
+	const rows = clampInteger(elements.rowCountInput.value, 1, 12);
+	const cols = clampInteger(elements.colCountInput.value, 1, 12);
+	const total = rows * cols;
+
+	if (classroom.students.length > total) {
+		setMessage(elements.message, `학생 ${classroom.students.length}명보다 좌석 ${total}석이 적음.`, 'error');
+		return;
+	}
+
+	classroom.rows = rows;
+	classroom.cols = cols;
+	classroom.seats = makeEmptySeatLayout(rows, cols).map((seat, index) => ({
+		...seat,
+		name: classroom.seats[index]?.name || '',
+		studentNumber: classroom.seats[index]?.studentNumber ?? null,
+		fixed: Boolean(classroom.seats[index]?.fixed),
+	}));
+	selectedIndex = -1;
+	swapIndex = -1;
+	renderAll();
+	setMessage(elements.message, `${rows}행 ${cols}열로 적용됨.`, 'success');
+	markDirty();
+}
+
+function clampInteger(value, min, max) {
+	const number = Number.parseInt(value, 10);
+
+	if (!Number.isFinite(number)) {
+		return min;
+	}
+
+	return Math.max(min, Math.min(max, number));
+}
+
 async function save() {
 	const payload = snapshotState({
 		classes: state.classes,
 		currentClassId: state.currentClassId,
 		gallery: state.gallery,
 		zoom: state.zoom,
+		flashAfterShuffle: state.settings.flashAfterShuffle,
+		autoSaveGallery: state.settings.autoSaveGallery,
 	});
 
 	const result = await window.seatApp.saveClassroom(payload);
@@ -702,6 +980,10 @@ async function load() {
 	state.currentClassId = loaded.currentClassId;
 	state.gallery = loaded.gallery || [];
 	state.zoom = loaded.zoom || state.zoom;
+	state.settings = {
+		...state.settings,
+		...(loaded.settings || {}),
+	};
 	selectedIndex = -1;
 	swapIndex = -1;
 	renderAll();
@@ -718,11 +1000,21 @@ function renderAll() {
 	renderDashboard();
 	renderStudentEditor();
 	renderChanger();
+	renderSettings();
 	renderGallery(elements.galleryBoard, state.gallery, {
 		onOpen: openGalleryPhoto,
 		onLoad: loadGalleryPhoto,
 		onDelete: deleteGalleryPhoto,
 	});
+}
+
+function renderSettings() {
+	if (document.activeElement !== elements.flashAfterShuffleInput) {
+		elements.flashAfterShuffleInput.checked = state.settings.flashAfterShuffle;
+	}
+	if (document.activeElement !== elements.autoSaveGalleryInput) {
+		elements.autoSaveGalleryInput.checked = state.settings.autoSaveGallery;
+	}
 }
 
 function renderSidebarSummary() {
@@ -815,6 +1107,12 @@ function renderChanger() {
 
 	elements.changerStudentCount.textContent = classroom.students.length;
 	elements.changerSeatCount.textContent = classroom.seats.length;
+	if (document.activeElement !== elements.rowCountInput) {
+		elements.rowCountInput.value = classroom.rows;
+	}
+	if (document.activeElement !== elements.colCountInput) {
+		elements.colCountInput.value = classroom.cols;
+	}
 	if (document.activeElement !== elements.avoidPairsInput) {
 		elements.avoidPairsInput.value = classroom.constraints?.avoidPairs || '';
 	}
@@ -851,24 +1149,7 @@ function readConstraintsFromInputs() {
 }
 
 async function openCapturePrompt(classroom) {
-	const boardRect = elements.seatCanvas.closest('#classroomGrid')?.getBoundingClientRect();
-
-	pendingPhoto = {
-		id: `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-		classId: classroom.id,
-		className: classroom.name,
-		createdAt: new Date().toISOString(),
-		students: [...classroom.students],
-		rows: classroom.rows,
-		cols: classroom.cols,
-		zoom: state.zoom,
-		imageData: null,
-		imageWidth: null,
-		imageHeight: null,
-		boardWidth: Math.round(boardRect?.width || 0) || null,
-		boardHeight: Math.round(boardRect?.height || 0) || null,
-		seats: classroom.seats.map((seat) => ({ ...seat })),
-	};
+	pendingPhoto = createGallerySnapshot(classroom);
 
 	renderPhotoPreview(elements.photoPreview, pendingPhoto);
 	elements.captureOverlay.classList.add('open');
@@ -884,8 +1165,37 @@ function savePendingPhoto() {
 		return;
 	}
 
-	state.gallery.unshift(pendingPhoto);
+	addPhotoToGallery(pendingPhoto);
 	closeCapturePrompt();
+}
+
+function saveGallerySnapshot(classroom) {
+	addPhotoToGallery(createGallerySnapshot(classroom));
+}
+
+function createGallerySnapshot(classroom) {
+	const boardRect = elements.seatCanvas.closest('#classroomGrid')?.getBoundingClientRect();
+
+	return {
+		id: `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+		classId: classroom.id,
+		className: classroom.name,
+		createdAt: new Date().toISOString(),
+		students: [...classroom.students],
+		rows: classroom.rows,
+		cols: classroom.cols,
+		zoom: state.zoom,
+		imageData: null,
+		imageWidth: null,
+		imageHeight: null,
+		boardWidth: Math.round(boardRect?.width || 0) || null,
+		boardHeight: Math.round(boardRect?.height || 0) || null,
+		seats: classroom.seats.map((seat) => ({ ...seat })),
+	};
+}
+
+function addPhotoToGallery(photo) {
+	state.gallery.unshift(photo);
 	renderGallery(elements.galleryBoard, state.gallery, {
 		onOpen: openGalleryPhoto,
 		onLoad: loadGalleryPhoto,
@@ -916,6 +1226,7 @@ function openGalleryPhoto(photoId) {
 
 function closeGalleryViewer() {
 	elements.viewerOverlay.classList.remove('open');
+	setViewerMaximized(false);
 	viewerPhotoId = null;
 }
 
@@ -933,6 +1244,24 @@ function setPhotoZoom(value) {
 	state.photoZoom = Math.max(0.5, Math.min(4, Number(value || 1)));
 	renderViewerPhoto();
 	setMessage(elements.message, `사진 확대율 ${Math.round(state.photoZoom * 100)}%`, 'normal');
+}
+
+async function toggleViewerMaximized() {
+	await setViewerMaximized(!viewerMaximized);
+}
+
+async function setViewerMaximized(value) {
+	viewerMaximized = Boolean(value);
+	elements.viewerOverlay.classList.toggle('maximized', viewerMaximized);
+	elements.maximizeViewerButton.textContent = viewerMaximized ? '복원' : '최대화';
+
+	try {
+		if (viewerMaximized && !document.fullscreenElement) {
+			await elements.viewerOverlay.requestFullscreen?.();
+		} else if (!viewerMaximized && document.fullscreenElement === elements.viewerOverlay) {
+			await document.exitFullscreen?.();
+		}
+	} catch {}
 }
 
 function loadGalleryPhoto(photoId) {
@@ -1149,7 +1478,26 @@ elements.discardGalleryButton.addEventListener('click', closeCapturePrompt);
 elements.viewerZoomOutButton.addEventListener('click', () => setPhotoZoom(state.photoZoom - 0.25));
 elements.viewerZoomInButton.addEventListener('click', () => setPhotoZoom(state.photoZoom + 0.25));
 elements.viewerZoomResetButton.addEventListener('click', () => setPhotoZoom(1));
+elements.maximizeViewerButton.addEventListener('click', toggleViewerMaximized);
 elements.closeViewerButton.addEventListener('click', closeGalleryViewer);
+elements.flashAfterShuffleInput.addEventListener('change', () => {
+	state.settings.flashAfterShuffle = elements.flashAfterShuffleInput.checked;
+	setMessage(
+		elements.message,
+		state.settings.flashAfterShuffle ? '플래시 효과 켜짐.' : '플래시 효과 꺼짐.',
+		'success',
+	);
+	markDirty();
+});
+elements.autoSaveGalleryInput.addEventListener('change', () => {
+	state.settings.autoSaveGallery = elements.autoSaveGalleryInput.checked;
+	setMessage(
+		elements.message,
+		state.settings.autoSaveGallery ? '갤러리 자동 저장 켜짐.' : '갤러리 자동 저장 꺼짐.',
+		'success',
+	);
+	markDirty();
+});
 elements.viewerPhoto.addEventListener('wheel', (event) => {
 	if (!event.ctrlKey) {
 		return;
@@ -1163,6 +1511,13 @@ elements.viewerOverlay.addEventListener('click', (event) => {
 		closeGalleryViewer();
 	}
 });
+document.addEventListener('fullscreenchange', () => {
+	if (!document.fullscreenElement && viewerMaximized) {
+		viewerMaximized = false;
+		elements.viewerOverlay.classList.remove('maximized');
+		elements.maximizeViewerButton.textContent = '최대화';
+	}
+});
 elements.captureOverlay.addEventListener('click', (event) => {
 	if (event.target === elements.captureOverlay) {
 		closeCapturePrompt();
@@ -1174,6 +1529,7 @@ elements.goChangerButton.addEventListener('click', () => setTab('changer'));
 elements.studentClassSelect.addEventListener('change', () => selectClass(elements.studentClassSelect.value));
 elements.changerClassSelect.addEventListener('change', () => selectClass(elements.changerClassSelect.value));
 elements.shuffleButton.addEventListener('click', shuffleSeats);
+elements.applyLayoutButton.addEventListener('click', applySeatLayout);
 elements.saveButton.addEventListener('click', save);
 elements.loadButton.addEventListener('click', load);
 elements.addSeatButton.addEventListener('click', addSeat);

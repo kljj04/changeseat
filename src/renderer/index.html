@@ -90,6 +90,17 @@
 					<div class="panel">
 						<h2>좌석 설정</h2>
 						<div class="action-stack">
+							<div class="split">
+								<label>
+									<span>행</span>
+									<input id="rowCountInput" type="number" min="1" max="12" step="1">
+								</label>
+								<label>
+									<span>열</span>
+									<input id="colCountInput" type="number" min="1" max="12" step="1">
+								</label>
+							</div>
+							<button id="applyLayoutButton">행/열 적용</button>
 							<button class="primary" id="shuffleButton">자리 섞기</button>
 							<div class="split">
 								<button id="addSeatButton">좌석 추가</button>
@@ -147,6 +158,14 @@
 			<section class="page" id="settingsPage" data-page="settings">
 				<div class="panel">
 					<h2>설정</h2>
+					<label class="checkbox-row">
+						<input id="flashAfterShuffleInput" type="checkbox">
+						<span>섞은 뒤 플래시 효과</span>
+					</label>
+					<label class="checkbox-row">
+						<input id="autoSaveGalleryInput" type="checkbox">
+						<span>섞은 뒤 갤러리 자동 저장</span>
+					</label>
 					<p class="muted">색상: #1E1E1E / 포인트: 주황색 / 스냅: 20px</p>
 				</div>
 			</section>
@@ -173,6 +192,7 @@
 						<button id="viewerZoomOutButton">-</button>
 						<button id="viewerZoomResetButton">100%</button>
 						<button id="viewerZoomInButton">+</button>
+						<button id="maximizeViewerButton">최대화</button>
 						<button id="closeViewerButton">닫기</button>
 					</div>
 				</div>

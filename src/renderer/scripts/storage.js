@@ -1,13 +1,24 @@
 import { makeEmptySeatLayout, normalizeSeat } from './seats.js';
 
-export function snapshotState({ classes, currentClassId, gallery = [], zoom = 1 }) {
+export function snapshotState({
+	classes,
+	currentClassId,
+	gallery = [],
+	zoom = 1,
+	flashAfterShuffle = false,
+	autoSaveGallery = false,
+}) {
 	return {
-		version: 4,
+		version: 6,
 		savedAt: new Date().toISOString(),
 		currentClassId,
 		classes,
 		gallery,
 		zoom,
+		settings: {
+			flashAfterShuffle: Boolean(flashAfterShuffle),
+			autoSaveGallery: Boolean(autoSaveGallery),
+		},
 	};
 }
 
@@ -23,6 +34,7 @@ export function normalizeLoadedState(data) {
 			currentClassId: data.currentClassId || classes[0]?.id || null,
 			gallery: normalizeGallery(data.gallery),
 			zoom: Number(data.zoom || 1),
+			settings: normalizeSettings(data.settings),
 		};
 	}
 
@@ -41,10 +53,18 @@ export function normalizeLoadedState(data) {
 			currentClassId: legacy.id,
 			gallery: [],
 			zoom: 1,
+			settings: normalizeSettings(),
 		};
 	}
 
 	throw new Error('자리표 파일 형식이 아님.');
+}
+
+function normalizeSettings(value) {
+	return {
+		flashAfterShuffle: Boolean(value?.flashAfterShuffle),
+		autoSaveGallery: Boolean(value?.autoSaveGallery || value?.captureAfterShuffle),
+	};
 }
 
 function normalizeGallery(value) {

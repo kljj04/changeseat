@@ -1,15 +1,5 @@
-@font-face {
-	font-family: "JetBrainsMonoSemiBold";
-	src: local("JetBrains Mono SemiBold"), local("JetBrainsMono-SemiBold"), local("JetBrains Mono");
-	font-weight: 600;
-}
-
-@font-face {
-	font-family: "PretendardKR";
-	src: local("Pretendard SemiBold"), local("Pretendard");
-	unicode-range: U+AC00-D7A3, U+1100-11FF, U+3130-318F;
-	font-weight: 600;
-}
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600&display=swap");
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
 
 :root {
 	color-scheme: dark;
@@ -29,7 +19,7 @@
 	--seat: #292929;
 	--seat-filled: #333333;
 	--seat-empty: #242424;
-	font-family: "JetBrainsMonoSemiBold", "PretendardKR", Consolas, monospace;
+	font-family: "JetBrains Mono", "Pretendard", Consolas, monospace;
 }
 
 * {
@@ -327,6 +317,22 @@ label span {
 	font-size: 12px;
 }
 
+.checkbox-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.checkbox-row input {
+	width: auto;
+}
+
+.checkbox-row span {
+	margin-bottom: 0;
+	color: var(--ink);
+}
+
 .stat-grid strong,
 .meta-list strong {
 	display: block;
@@ -489,9 +495,7 @@ body.changer-panel-closed .changer-sidebar {
 	touch-action: none;
 	user-select: none;
 	transform-origin: center center;
-	transition:
-		left 500ms ease,
-		top 500ms ease;
+	transition: none;
 }
 
 .seat-body {
@@ -610,8 +614,26 @@ body.changer-panel-closed .changer-sidebar {
 	background: var(--bg);
 }
 
+body.shuffling-text .seat {
+	z-index: 6;
+}
+
+body.shuffling-text .seat.shuffling-hidden {
+	opacity: 0.42;
+}
+
 body.shuffling-text .seat-content {
-	animation: textShuffle 180ms steps(2, end) infinite;
+	animation: textShuffle 220ms steps(2, end) infinite;
+}
+
+.seat-shuffle-clone {
+	position: fixed !important;
+	z-index: 320 !important;
+	margin: 0 !important;
+	pointer-events: none !important;
+	transform-origin: top left;
+	will-change: transform;
+	box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
 }
 
 .capture-overlay {
@@ -917,6 +939,19 @@ body.gallery-fly::before {
 	padding: 12px;
 }
 
+.viewer-overlay.maximized {
+	place-items: stretch;
+	background: #1e1e1e;
+	backdrop-filter: none;
+}
+
+.viewer-overlay.maximized .viewer-card {
+	width: 100vw;
+	height: 100vh;
+	border: 0;
+	padding: 10px;
+}
+
 .viewer-topbar {
 	display: flex;
 	align-items: center;
@@ -991,18 +1026,15 @@ body.gallery-fly::before {
 
 @keyframes textShuffle {
 	0% {
-		transform: translate(-50%, -50%) skewX(0deg);
-		filter: blur(0);
+		opacity: 1;
 	}
 
 	50% {
-		transform: translate(-50%, -50%) skewX(-8deg);
-		filter: blur(0.8px);
+		opacity: 0.72;
 	}
 
 	100% {
-		transform: translate(-50%, -50%) skewX(6deg);
-		filter: blur(0);
+		opacity: 1;
 	}
 }
 
