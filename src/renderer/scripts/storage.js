@@ -1,4 +1,4 @@
-import { makeEmptySeatLayout, normalizeSeat } from './seats.js';
+import { makeEmptySeatLayout, normalizeSeat, normalizeStudent } from './seats.js';
 
 export function snapshotState({
 	classes,
@@ -76,7 +76,7 @@ function normalizeGallery(value) {
 		id: item?.id || `gallery-${Date.now()}-${index}`,
 		className: String(item?.className || '반 없음'),
 		createdAt: item?.createdAt || new Date().toISOString(),
-		students: Array.isArray(item?.students) ? item.students.map(String) : [],
+		students: normalizeStudents(item?.students),
 		rows: Number(item?.rows || 5),
 		cols: Number(item?.cols || 6),
 		zoom: Number(item?.zoom || 1),
@@ -92,7 +92,7 @@ function normalizeGallery(value) {
 export function normalizeClassroom(classroom, index = 0) {
 	const rows = Number(classroom?.rows || 5);
 	const cols = Number(classroom?.cols || 6);
-	const students = Array.isArray(classroom?.students) ? classroom.students.map(String) : [];
+	const students = normalizeStudents(classroom?.students);
 
 	return {
 		id: classroom?.id || `class-${Date.now()}-${index}`,
@@ -105,11 +105,22 @@ export function normalizeClassroom(classroom, index = 0) {
 	};
 }
 
+function normalizeStudents(value) {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	return value
+		.map((student, index) => normalizeStudent(student, index))
+		.filter((student) => student.name);
+}
+
 function normalizeConstraints(value) {
 	return {
 		avoidPairs: String(value?.avoidPairs || ''),
 		preferPairs: String(value?.preferPairs || ''),
 		radiusAvoidPairs: String(value?.radiusAvoidPairs || ''),
+		genderPairMode: ['same', 'mixed'].includes(value?.genderPairMode) ? value.genderPairMode : 'none',
 	};
 }
 

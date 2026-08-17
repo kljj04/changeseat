@@ -33,19 +33,6 @@
 			</header>
 
 			<section class="page active" id="dashboardPage" data-page="dashboard">
-				<div class="panel">
-					<h2>빠른 시작</h2>
-					<div class="form-row">
-						<input id="quickClassName" type="text" placeholder="반 이름">
-						<button id="quickAddClassButton">반 추가</button>
-					</div>
-					<textarea id="quickStudentInput" spellcheck="false" placeholder="학생 이름을 한 줄에 한 명씩 입력"></textarea>
-					<div class="form-row">
-						<button class="primary" id="quickApplyStudentsButton">선택 반에 학생 적용</button>
-						<button id="goChangerButton">자리바꾸기 열기</button>
-					</div>
-				</div>
-
 				<div class="panel stats-panel">
 					<h2>현재 상태</h2>
 					<div class="stat-grid">
@@ -53,13 +40,21 @@
 						<div><span>학생</span><strong id="dashStudentCount">0</strong></div>
 						<div><span>좌석</span><strong id="dashSeatCount">0</strong></div>
 					</div>
+					<div class="stat-grid">
+						<div><span>전체 반</span><strong id="dashClassCount">0</strong></div>
+						<div><span>갤러리</span><strong id="dashGalleryCount">0</strong></div>
+						<div><span>자동 저장</span><strong>ON</strong></div>
+					</div>
 					<button id="deleteClassButton">선택 반 삭제</button>
 				</div>
 			</section>
 
 			<section class="page" id="classesPage" data-page="classes">
 				<div class="panel">
-					<h2>내 반</h2>
+					<div class="section-title">
+						<h2>내 반</h2>
+						<button class="primary" id="openClassModalButton">+ 새 반</button>
+					</div>
 					<div class="class-list" id="classList"></div>
 				</div>
 			</section>
@@ -70,7 +65,17 @@
 					<div class="form-row">
 						<select id="studentClassSelect"></select>
 					</div>
-					<textarea id="studentInput" readonly spellcheck="false" placeholder="대시보드에서 학생을 추가해."></textarea>
+					<div class="student-add-row">
+						<span class="student-create-number" id="studentManagerDraftNumber">1</span>
+						<span class="student-create-divider">|</span>
+						<input id="studentManagerNameInput" type="text" placeholder="이름">
+						<div class="student-create-gender" role="radiogroup" aria-label="성별">
+							<label><input type="radio" name="student-manager-gender" value="남" checked><span>남</span></label>
+							<label><input type="radio" name="student-manager-gender" value="여"><span>여</span></label>
+						</div>
+						<button id="addStudentManagerButton">추가</button>
+					</div>
+					<div class="student-create-list student-manager-list" id="studentManagerList"></div>
 				</div>
 			</section>
 
@@ -142,6 +147,14 @@
 								<span>어느 반경 안에 붙으면 안 되는 짝</span>
 								<textarea id="radiusAvoidPairsInput" spellcheck="false" placeholder="김민준, 최하윤, 1&#10;이서연, 박지후, 2"></textarea>
 							</label>
+							<label>
+								<span>성별 배치</span>
+								<select id="genderPairModeSelect">
+									<option value="none">사용 안 함</option>
+									<option value="same">동성 배치</option>
+									<option value="mixed">이성 배치</option>
+								</select>
+							</label>
 							<button class="primary" id="saveConstraintsButton">조건 저장</button>
 						</div>
 					</aside>
@@ -197,6 +210,40 @@
 					</div>
 				</div>
 				<div class="photo-card expanded" id="viewerPhoto"></div>
+			</div>
+		</div>
+
+		<div class="class-modal-overlay" id="classModalOverlay">
+			<div class="class-modal">
+				<div class="section-title">
+					<h2 id="classModalTitle">새 반</h2>
+					<button id="closeClassModalButton">닫기</button>
+				</div>
+				<div class="class-modal-step active" id="classNameStep">
+					<label>
+						<span>반 이름</span>
+						<input id="classModalNameInput" type="text" placeholder="예: 1반">
+					</label>
+				</div>
+				<div class="class-modal-step" id="classStudentStep">
+					<div class="student-add-row">
+						<span class="student-create-number" id="studentDraftNumber">1</span>
+						<span class="student-create-divider">|</span>
+						<input id="studentDraftNameInput" type="text" placeholder="이름">
+						<div class="student-create-gender" role="radiogroup" aria-label="성별">
+							<label><input type="radio" name="student-draft-gender" value="남" checked><span>남</span></label>
+							<label><input type="radio" name="student-draft-gender" value="여"><span>여</span></label>
+						</div>
+						<button id="addStudentDraftButton">추가</button>
+					</div>
+					<div class="student-create-list" id="classModalStudentList"></div>
+				</div>
+				<div class="modal-actions">
+					<button id="backClassModalButton">이전</button>
+					<button class="primary" id="nextClassModalButton">다음</button>
+					<button class="primary" id="createClassModalButton">저장 후 나가기</button>
+					<button id="cancelClassModalButton">취소</button>
+				</div>
 			</div>
 		</div>
 	</main>

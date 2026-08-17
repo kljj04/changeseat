@@ -6,7 +6,46 @@ export function parseStudents(rawText) {
 	return rawText
 		.split(/\r?\n/)
 		.map((line) => line.trim())
-		.filter(Boolean);
+		.filter(Boolean)
+		.map((name, index) => normalizeStudent({ name }, index));
+}
+
+export function normalizeStudent(value, index = 0) {
+	if (typeof value === 'string') {
+		return {
+			number: index + 1,
+			name: value,
+			gender: '',
+		};
+	}
+
+	return {
+		number: Number(value?.number || value?.studentNumber || index + 1),
+		name: String(value?.name || ''),
+		gender: normalizeGender(value?.gender),
+	};
+}
+
+export function studentName(value) {
+	return typeof value === 'string' ? value : String(value?.name || '');
+}
+
+export function studentNumber(value, fallbackIndex = 0) {
+	return Number(typeof value === 'object' ? value?.number : fallbackIndex + 1) || fallbackIndex + 1;
+}
+
+function normalizeGender(value) {
+	const gender = String(value || '').trim();
+
+	if (gender === '남' || gender.toLowerCase() === 'male' || gender.toLowerCase() === 'm') {
+		return '남';
+	}
+
+	if (gender === '여' || gender.toLowerCase() === 'female' || gender.toLowerCase() === 'f') {
+		return '여';
+	}
+
+	return '';
 }
 
 export function shuffle(list) {
@@ -22,24 +61,25 @@ export function shuffle(list) {
 
 export function makeSeatPlan(students, rows, cols) {
 	const total = rows * cols;
-	const shuffled = shuffle(students.map((name, index) => ({
-		name,
-		studentNumber: index + 1,
+	const shuffled = shuffle(students.map((student, index) => ({
+		name: studentName(student),
+		studentNumber: studentNumber(student, index),
+		gender: normalizeStudent(student, index).gender,
 	}))).slice(0, total);
 	const seats = [];
 
 	while (shuffled.length < total) {
-		shuffled.push({ name: '', studentNumber: null });
+		shuffled.push({ name: '', studentNumber: null, gender: '' });
 	}
 
 	for (let index = 0; index < total; index += 1) {
-		seats.push(createSeat(index, shuffled[index].name, cols, shuffled[index].studentNumber));
+		seats.push(createSeat(index, shuffled[index].name, cols, shuffled[index].studentNumber, shuffled[index].gender));
 	}
 
 	return seats;
 }
 
-export function createSeat(index, name, cols, studentNumber = null) {
+export function createSeat(index, name, cols, studentNumber = null, gender = '') {
 	const col = index % cols;
 	const row = Math.floor(index / cols);
 
@@ -47,6 +87,7 @@ export function createSeat(index, name, cols, studentNumber = null) {
 		id: `seat-${index + 1}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
 		name,
 		studentNumber,
+		gender,
 		x: snap(40 + col * 100),
 		y: snap(70 + row * 60),
 		fixed: false,
@@ -86,6 +127,7 @@ export function normalizeSeat(value, index, cols) {
 		id: value?.id || fallback.id,
 		name: String(value?.name || ''),
 		studentNumber: value?.studentNumber ?? null,
+		gender: normalizeStudent(value, index).gender,
 		x: snap(Number.isFinite(Number(value?.x)) ? Number(value.x) : fallback.x),
 		y: snap(Number.isFinite(Number(value?.y)) ? Number(value.y) : fallback.y),
 		fixed: Boolean(value?.fixed),

@@ -1,4 +1,14 @@
-import { createSeat, makeEmptySeatLayout, makeSeatPlan, parseStudents, snap, shuffle } from './seats.js';
+import {
+	createSeat,
+	makeEmptySeatLayout,
+	makeSeatPlan,
+	normalizeStudent,
+	parseStudents,
+	snap,
+	studentName,
+	studentNumber,
+	shuffle,
+} from './seats.js';
 import { normalizeClassroom, normalizeLoadedState, snapshotState } from './storage.js';
 import { renderGallery, renderPhotoPreview, renderSeats, setMessage, sleep, updateSeatElement } from './ui.js';
 
@@ -14,6 +24,7 @@ const elements = {
 	avoidPairsInput: document.querySelector('#avoidPairsInput'),
 	preferPairsInput: document.querySelector('#preferPairsInput'),
 	radiusAvoidPairsInput: document.querySelector('#radiusAvoidPairsInput'),
+	genderPairModeSelect: document.querySelector('#genderPairModeSelect'),
 	saveConstraintsButton: document.querySelector('#saveConstraintsButton'),
 	goDashboardTopButton: document.querySelector('#goDashboardTopButton'),
 	toggleChangerPanelButton: document.querySelector('#toggleChangerPanelButton'),
@@ -35,20 +46,35 @@ const elements = {
 	closeViewerButton: document.querySelector('#closeViewerButton'),
 	flashAfterShuffleInput: document.querySelector('#flashAfterShuffleInput'),
 	autoSaveGalleryInput: document.querySelector('#autoSaveGalleryInput'),
+	classModalOverlay: document.querySelector('#classModalOverlay'),
+	classModalTitle: document.querySelector('#classModalTitle'),
+	classNameStep: document.querySelector('#classNameStep'),
+	classStudentStep: document.querySelector('#classStudentStep'),
+	classModalNameInput: document.querySelector('#classModalNameInput'),
+	classModalStudentList: document.querySelector('#classModalStudentList'),
+	studentDraftNumber: document.querySelector('#studentDraftNumber'),
+	studentDraftNameInput: document.querySelector('#studentDraftNameInput'),
+	addStudentDraftButton: document.querySelector('#addStudentDraftButton'),
+	openClassModalButton: document.querySelector('#openClassModalButton'),
+	closeClassModalButton: document.querySelector('#closeClassModalButton'),
+	backClassModalButton: document.querySelector('#backClassModalButton'),
+	nextClassModalButton: document.querySelector('#nextClassModalButton'),
+	createClassModalButton: document.querySelector('#createClassModalButton'),
+	cancelClassModalButton: document.querySelector('#cancelClassModalButton'),
 
-	quickClassName: document.querySelector('#quickClassName'),
-	quickAddClassButton: document.querySelector('#quickAddClassButton'),
-	quickStudentInput: document.querySelector('#quickStudentInput'),
-	quickApplyStudentsButton: document.querySelector('#quickApplyStudentsButton'),
-	goChangerButton: document.querySelector('#goChangerButton'),
 	dashClassName: document.querySelector('#dashClassName'),
 	dashStudentCount: document.querySelector('#dashStudentCount'),
 	dashSeatCount: document.querySelector('#dashSeatCount'),
+	dashClassCount: document.querySelector('#dashClassCount'),
+	dashGalleryCount: document.querySelector('#dashGalleryCount'),
 
 	classList: document.querySelector('#classList'),
 
 	studentClassSelect: document.querySelector('#studentClassSelect'),
-	studentInput: document.querySelector('#studentInput'),
+	studentManagerDraftNumber: document.querySelector('#studentManagerDraftNumber'),
+	studentManagerNameInput: document.querySelector('#studentManagerNameInput'),
+	addStudentManagerButton: document.querySelector('#addStudentManagerButton'),
+	studentManagerList: document.querySelector('#studentManagerList'),
 
 	changerClassSelect: document.querySelector('#changerClassSelect'),
 	changerStudentCount: document.querySelector('#changerStudentCount'),
@@ -94,12 +120,14 @@ let pendingPhoto = null;
 let viewerPhotoId = null;
 let viewerMaximized = false;
 let saveTimer = null;
+let classModalStudents = [];
+let draggedStudentIndex = -1;
 
 function activeClass() {
 	return state.classes.find((classroom) => classroom.id === state.currentClassId) || null;
 }
 
-function ensureDefaultClass() {
+function ensureValidCurrentClass() {
 	if (state.classes.length > 0) {
 		if (!activeClass()) {
 			state.currentClassId = state.classes[0].id;
@@ -107,16 +135,14 @@ function ensureDefaultClass() {
 		return;
 	}
 
-	const classroom = createClassroom('1반');
-	state.classes.push(classroom);
-	state.currentClassId = classroom.id;
+	state.currentClassId = null;
 }
 
-function createClassroom(name) {
+function createClassroom(name, students = []) {
 	return normalizeClassroom({
 		id: `class-${Date.now()}-${Math.random().toString(16).slice(2)}`,
 		name,
-		students: [],
+		students,
 		rows: 5,
 		cols: 6,
 		seats: makeEmptySeatLayout(5, 6),
@@ -211,7 +237,7 @@ function closeHamburgerPanel() {
 	elements.hamburgerPanel.classList.remove('open');
 }
 
-function addClass(rawName) {
+function addClass(rawName, students = []) {
 	const name = String(rawName || '').trim();
 
 	if (!name) {
@@ -219,7 +245,8 @@ function addClass(rawName) {
 		return null;
 	}
 
-	const classroom = createClassroom(name);
+	const classroom = createClassroom(name, students);
+	syncSeatsWithStudents(classroom);
 	state.classes.push(classroom);
 	state.currentClassId = classroom.id;
 	selectedIndex = -1;
@@ -228,6 +255,191 @@ function addClass(rawName) {
 	renderAll();
 	markDirty();
 	return classroom;
+}
+
+function openClassModal() {
+	elements.classModalNameInput.value = '';
+	classModalStudents = [];
+	renderClassModalStudents();
+	resetStudentDraft();
+	elements.classModalOverlay.classList.add('open');
+	setClassModalStep('name');
+	elements.classModalNameInput.focus();
+}
+
+function closeClassModal() {
+	elements.classModalOverlay.classList.remove('open');
+}
+
+function setClassModalStep(step) {
+	const isNameStep = step === 'name';
+	elements.classModalTitle.textContent = isNameStep ? '새 반' : '학생 지정';
+	elements.classNameStep.classList.toggle('active', isNameStep);
+	elements.classStudentStep.classList.toggle('active', !isNameStep);
+	elements.backClassModalButton.style.display = isNameStep ? 'none' : '';
+	elements.nextClassModalButton.style.display = isNameStep ? '' : 'none';
+	elements.createClassModalButton.style.display = isNameStep ? 'none' : '';
+}
+
+function goClassStudentStep() {
+	if (!elements.classModalNameInput.value.trim()) {
+		setMessage(elements.message, '반 이름을 입력해.', 'error');
+		elements.classModalNameInput.focus();
+		return;
+	}
+
+	setClassModalStep('students');
+	elements.studentDraftNameInput.focus();
+}
+
+function createClassFromModal() {
+	const classroom = addClass(elements.classModalNameInput.value, readClassModalStudents());
+
+	if (!classroom) {
+		return;
+	}
+
+	closeClassModal();
+}
+
+function addStudentDraft() {
+	const name = elements.studentDraftNameInput.value.trim();
+
+	if (!name) {
+		elements.studentDraftNameInput.focus();
+		return;
+	}
+
+	classModalStudents.push({
+		name,
+		gender: getStudentDraftGender(),
+	});
+	renderClassModalStudents();
+	resetStudentDraft();
+	elements.studentDraftNameInput.focus();
+}
+
+function getStudentDraftGender() {
+	return document.querySelector('input[name="student-draft-gender"]:checked')?.value || '남';
+}
+
+function resetStudentDraft() {
+	elements.studentDraftNameInput.value = '';
+	elements.studentDraftNumber.textContent = classModalStudents.length + 1;
+	const male = document.querySelector('input[name="student-draft-gender"][value="남"]');
+	if (male) {
+		male.checked = true;
+	}
+}
+
+function renderClassModalStudents() {
+	renderStudentCards(elements.classModalStudentList, classModalStudents, {
+		onDelete: (index) => {
+			classModalStudents.splice(index, 1);
+			renderClassModalStudents();
+		},
+		onReorder: reorderClassModalStudent,
+	});
+	resetStudentDraft();
+}
+
+function renderStudentCards(container, students, actions = {}) {
+	container.replaceChildren();
+	container.studentCardActions = actions;
+	bindStudentCardDropZone(container);
+
+	for (let index = 0; index < students.length; index += 1) {
+		const student = students[index];
+		const card = document.createElement('div');
+		card.className = 'student-card';
+		card.draggable = true;
+		card.dataset.index = String(index);
+		card.innerHTML = `
+			<span class="student-card-number">${index + 1}</span>
+			<strong>${escapeHtml(studentName(student))}</strong>
+			<span>${escapeHtml(student.gender || '')}</span>
+			<button type="button" data-action="delete">삭제</button>
+		`;
+		card.addEventListener('dragstart', () => {
+			draggedStudentIndex = index;
+			card.classList.add('dragging');
+		});
+		card.addEventListener('dragend', () => {
+			draggedStudentIndex = -1;
+			card.classList.remove('dragging');
+		});
+		card.querySelector('[data-action="delete"]').addEventListener('click', () => actions.onDelete?.(index));
+		container.appendChild(card);
+	}
+}
+
+function bindStudentCardDropZone(container) {
+	if (container.dataset.dropBound === 'true') {
+		return;
+	}
+
+	container.dataset.dropBound = 'true';
+	container.addEventListener('dragover', (event) => {
+		event.preventDefault();
+		const afterElement = getStudentDragAfterElement(container, event.clientY);
+		const dragging = container.querySelector('.student-card.dragging');
+
+		if (!dragging) {
+			return;
+		}
+
+		if (!afterElement) {
+			container.appendChild(dragging);
+			return;
+		}
+
+		container.insertBefore(dragging, afterElement);
+	});
+	container.addEventListener('drop', (event) => {
+		event.preventDefault();
+		const toIndex = [...container.querySelectorAll('.student-card')].findIndex((card) => card.classList.contains('dragging'));
+		container.studentCardActions?.onReorder?.(draggedStudentIndex, toIndex);
+	});
+}
+
+function getStudentDragAfterElement(container, y) {
+	const cards = [...container.querySelectorAll('.student-card:not(.dragging)')];
+
+	return cards.reduce((closest, card) => {
+		const box = card.getBoundingClientRect();
+		const offset = y - box.top - box.height / 2;
+
+		if (offset < 0 && offset > closest.offset) {
+			return {
+				offset,
+				element: card,
+			};
+		}
+
+		return closest;
+	}, {
+		offset: Number.NEGATIVE_INFINITY,
+		element: null,
+	}).element;
+}
+
+function reorderClassModalStudent(fromIndex, toIndex) {
+	if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+		return;
+	}
+
+	classModalStudents = reorderByFinalIndex(classModalStudents, fromIndex, toIndex);
+	renderClassModalStudents();
+}
+
+function readClassModalStudents() {
+	return classModalStudents
+		.map((student, index) => normalizeStudent({
+			number: index + 1,
+			name: student.name,
+			gender: student.gender,
+		}, index))
+		.filter((student) => student.name);
 }
 
 function selectClass(classId) {
@@ -268,7 +480,7 @@ function applyStudents(rawText) {
 	}
 
 	classroom.students = parseStudents(rawText);
-	classroom.seats = mergeSeatNames(classroom.seats, makeSeatPlan(classroom.students, 1, classroom.seats.length));
+	syncSeatsWithStudents(classroom);
 	setMessage(elements.message, '학생 목록 저장됨.', 'success');
 	renderAll();
 	markDirty();
@@ -293,6 +505,7 @@ function mergeSeatNames(layoutSeats, plannedSeats) {
 		...seat,
 		name: plannedSeats[index]?.name || '',
 		studentNumber: plannedSeats[index]?.studentNumber ?? null,
+		gender: plannedSeats[index]?.gender || '',
 	}));
 }
 
@@ -401,6 +614,7 @@ async function animateSeatAssignmentPermutation(classroom, indexes, duration) {
 		targetIndex: targetIndexes[indexes.indexOf(index)],
 		name: classroom.seats[index].name,
 		studentNumber: classroom.seats[index].studentNumber,
+		gender: classroom.seats[index].gender,
 	}));
 
 	await animateAssignmentClones(assignments, duration);
@@ -408,6 +622,7 @@ async function animateSeatAssignmentPermutation(classroom, indexes, duration) {
 	for (const assignment of assignments) {
 		classroom.seats[assignment.targetIndex].name = assignment.name;
 		classroom.seats[assignment.targetIndex].studentNumber = assignment.studentNumber;
+		classroom.seats[assignment.targetIndex].gender = assignment.gender;
 	}
 
 	renderAll();
@@ -455,6 +670,7 @@ async function animateToFinalSeats(classroom, finalSeats, duration) {
 			targetIndex,
 			name: finalSeat.name,
 			studentNumber: finalSeat.studentNumber,
+			gender: finalSeat.gender,
 		});
 	}
 
@@ -545,6 +761,7 @@ function shuffleSeatNamesWithFixed(classroom) {
 		const score =
 			countAvoidPairConflicts(candidate, constraints.avoidPairs) +
 			countRadiusAvoidPairConflicts(candidate, constraints.radiusAvoidPairs) +
+			countGenderPairMisses(candidate, constraints.genderPairMode) +
 			countPreferPairMisses(candidate, constraints.preferPairs);
 
 		if (score < bestScore) {
@@ -571,13 +788,14 @@ function assignShuffledPool(classroom) {
 			return seat;
 		}
 
-		const picked = pool[cursor] || { name: '', studentNumber: null };
+		const picked = pool[cursor] || { name: '', studentNumber: null, gender: '' };
 		cursor += 1;
 
 		return {
 			...seat,
 			name: picked.name,
 			studentNumber: picked.studentNumber,
+			gender: picked.gender,
 		};
 	});
 }
@@ -587,7 +805,12 @@ function getPairConstraints(classroom) {
 		avoidPairs: parseNamePairs(classroom.constraints?.avoidPairs),
 		preferPairs: parseNamePairs(classroom.constraints?.preferPairs),
 		radiusAvoidPairs: parseRadiusAvoidPairs(classroom.constraints?.radiusAvoidPairs),
+		genderPairMode: normalizeGenderPairMode(classroom.constraints?.genderPairMode),
 	};
+}
+
+function normalizeGenderPairMode(value) {
+	return ['same', 'mixed'].includes(value) ? value : 'none';
 }
 
 function parseNamePairs(rawText) {
@@ -724,6 +947,36 @@ function countRadiusAvoidPairConflicts(seats, pairs) {
 	return count;
 }
 
+function countGenderPairMisses(seats, mode) {
+	if (mode === 'none') {
+		return 0;
+	}
+
+	const pairMap = buildSeatPairMap(seats);
+	let count = 0;
+
+	for (const [firstIndex, secondIndex] of pairMap.entries()) {
+		if (firstIndex > secondIndex) {
+			continue;
+		}
+
+		const first = seats[firstIndex];
+		const second = seats[secondIndex];
+
+		if (!first?.name || !second?.name || !first.gender || !second.gender) {
+			continue;
+		}
+
+		const sameGender = first.gender === second.gender;
+
+		if ((mode === 'same' && !sameGender) || (mode === 'mixed' && sameGender)) {
+			count += 1;
+		}
+	}
+
+	return count;
+}
+
 function seatDistance(first, second) {
 	const horizontalGap = 100;
 	const verticalGap = 60;
@@ -745,9 +998,10 @@ function getShufflePool(classroom) {
 			.map((seat) => seat.name),
 	);
 	return classroom.students
-		.map((name, index) => ({
-			name,
-			studentNumber: index + 1,
+		.map((student, index) => ({
+			name: studentName(student),
+			studentNumber: studentNumber(student, index),
+			gender: student.gender || '',
 		}))
 		.filter((student) => !fixedNumbers.has(student.studentNumber) && !fixedNames.has(student.name));
 }
@@ -757,7 +1011,7 @@ function getShuffledStudentFirstPool(classroom) {
 	const openSeatCount = classroom.seats.filter((seat) => !seat.fixed).length;
 
 	while (pool.length < openSeatCount) {
-		pool.push({ name: '', studentNumber: null });
+		pool.push({ name: '', studentNumber: null, gender: '' });
 	}
 
 	return pool.slice(0, openSeatCount);
@@ -993,7 +1247,7 @@ async function load() {
 }
 
 function renderAll() {
-	ensureDefaultClass();
+	ensureValidCurrentClass();
 	renderSidebarSummary();
 	renderClassList();
 	renderClassSelects();
@@ -1029,10 +1283,8 @@ function renderDashboard() {
 	elements.dashClassName.textContent = classroom?.name || '없음';
 	elements.dashStudentCount.textContent = classroom?.students.length || 0;
 	elements.dashSeatCount.textContent = classroom?.seats.length || 0;
-
-	if (classroom && document.activeElement !== elements.quickStudentInput) {
-		elements.quickStudentInput.value = classroom.students.join('\n');
-	}
+	elements.dashClassCount.textContent = state.classes.length;
+	elements.dashGalleryCount.textContent = state.gallery.length;
 }
 
 function renderClassList() {
@@ -1083,13 +1335,98 @@ function renderStudentEditor() {
 	const classroom = activeClass();
 
 	if (!classroom) {
-		elements.studentInput.value = '';
+		elements.studentManagerDraftNumber.textContent = '1';
+		elements.studentManagerNameInput.value = '';
+		elements.studentManagerList.replaceChildren();
 		return;
 	}
 
-	if (document.activeElement !== elements.studentInput) {
-		elements.studentInput.value = classroom.students.join('\n');
+	elements.studentManagerDraftNumber.textContent = classroom.students.length + 1;
+	renderStudentCards(elements.studentManagerList, classroom.students, {
+		onDelete: deleteManagedStudent,
+		onReorder: reorderManagedStudent,
+	});
+}
+
+function addManagedStudent() {
+	const classroom = activeClass();
+	const name = elements.studentManagerNameInput.value.trim();
+
+	if (!classroom || !name) {
+		elements.studentManagerNameInput.focus();
+		return;
 	}
+
+	classroom.students.push(normalizeStudent({
+		number: classroom.students.length + 1,
+		name,
+		gender: getManagedStudentGender(),
+	}, classroom.students.length));
+	syncSeatsWithStudents(classroom);
+	elements.studentManagerNameInput.value = '';
+	resetManagedStudentGender();
+	renderAll();
+	markDirty();
+	elements.studentManagerNameInput.focus();
+}
+
+function getManagedStudentGender() {
+	return document.querySelector('input[name="student-manager-gender"]:checked')?.value || '남';
+}
+
+function resetManagedStudentGender() {
+	const male = document.querySelector('input[name="student-manager-gender"][value="남"]');
+	if (male) {
+		male.checked = true;
+	}
+}
+
+function deleteManagedStudent(index) {
+	const classroom = activeClass();
+
+	if (!classroom) {
+		return;
+	}
+
+	classroom.students.splice(index, 1);
+	renumberStudents(classroom.students);
+	syncSeatsWithStudents(classroom);
+	renderAll();
+	markDirty();
+}
+
+function reorderManagedStudent(fromIndex, toIndex) {
+	const classroom = activeClass();
+
+	if (!classroom || fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+		return;
+	}
+
+	classroom.students = reorderByFinalIndex(classroom.students, fromIndex, toIndex);
+	renumberStudents(classroom.students);
+	syncSeatsWithStudents(classroom);
+	renderAll();
+	markDirty();
+}
+
+function reorderByFinalIndex(items, fromIndex, toIndex) {
+	const result = [...items];
+	const [item] = result.splice(fromIndex, 1);
+	result.splice(toIndex, 0, item);
+	return result;
+}
+
+function renumberStudents(students) {
+	for (let index = 0; index < students.length; index += 1) {
+		students[index] = normalizeStudent({
+			...students[index],
+			number: index + 1,
+		}, index);
+	}
+}
+
+function syncSeatsWithStudents(classroom) {
+	classroom.seats = mergeSeatNames(classroom.seats, makeSeatPlan(classroom.students, 1, classroom.seats.length));
 }
 
 function renderChanger() {
@@ -1101,6 +1438,7 @@ function renderChanger() {
 		elements.avoidPairsInput.value = '';
 		elements.preferPairsInput.value = '';
 		elements.radiusAvoidPairsInput.value = '';
+		elements.genderPairModeSelect.value = 'none';
 		renderSeats(elements.seatCanvas, [], -1);
 		return;
 	}
@@ -1121,6 +1459,9 @@ function renderChanger() {
 	}
 	if (document.activeElement !== elements.radiusAvoidPairsInput) {
 		elements.radiusAvoidPairsInput.value = classroom.constraints?.radiusAvoidPairs || '';
+	}
+	if (document.activeElement !== elements.genderPairModeSelect) {
+		elements.genderPairModeSelect.value = normalizeGenderPairMode(classroom.constraints?.genderPairMode);
 	}
 	renderSeats(elements.seatCanvas, classroom.seats, selectedIndex);
 }
@@ -1145,6 +1486,7 @@ function readConstraintsFromInputs() {
 		avoidPairs: elements.avoidPairsInput.value,
 		preferPairs: elements.preferPairsInput.value,
 		radiusAvoidPairs: elements.radiusAvoidPairsInput.value,
+		genderPairMode: elements.genderPairModeSelect.value,
 	};
 }
 
@@ -1280,7 +1622,7 @@ function loadGalleryPhoto(photoId) {
 	}
 
 	classroom.name = photo.className;
-	classroom.students = [...(photo.students || [])];
+	classroom.students = (photo.students || []).map((student, index) => normalizeStudent(student, index));
 	classroom.rows = photo.rows || classroom.rows;
 	classroom.cols = photo.cols || classroom.cols;
 	classroom.seats = photo.seats.map((seat) => ({ ...seat, fixed: Boolean(seat.fixed) }));
@@ -1439,10 +1781,13 @@ function handleSeatClick(index) {
 function swapSeatAssignments(first, second) {
 	const firstName = first.name;
 	const firstNumber = first.studentNumber;
+	const firstGender = first.gender;
 	first.name = second.name;
 	first.studentNumber = second.studentNumber;
+	first.gender = second.gender;
 	second.name = firstName;
 	second.studentNumber = firstNumber;
+	second.gender = firstGender;
 }
 
 function escapeHtml(value) {
@@ -1523,10 +1868,38 @@ elements.captureOverlay.addEventListener('click', (event) => {
 		closeCapturePrompt();
 	}
 });
-elements.quickAddClassButton.addEventListener('click', () => addClass(elements.quickClassName.value));
-elements.quickApplyStudentsButton.addEventListener('click', () => applyStudents(elements.quickStudentInput.value));
-elements.goChangerButton.addEventListener('click', () => setTab('changer'));
+elements.classModalOverlay.addEventListener('click', (event) => {
+	if (event.target === elements.classModalOverlay) {
+		closeClassModal();
+	}
+});
+elements.openClassModalButton.addEventListener('click', openClassModal);
+elements.closeClassModalButton.addEventListener('click', closeClassModal);
+elements.cancelClassModalButton.addEventListener('click', closeClassModal);
+elements.backClassModalButton.addEventListener('click', () => setClassModalStep('name'));
+elements.nextClassModalButton.addEventListener('click', goClassStudentStep);
+elements.createClassModalButton.addEventListener('click', createClassFromModal);
+elements.addStudentDraftButton.addEventListener('click', addStudentDraft);
+elements.classModalNameInput.addEventListener('keydown', (event) => {
+	if (event.key === 'Enter') {
+		event.preventDefault();
+		goClassStudentStep();
+	}
+});
+elements.studentDraftNameInput.addEventListener('keydown', (event) => {
+	if (event.key === 'Enter') {
+		event.preventDefault();
+		addStudentDraft();
+	}
+});
 elements.studentClassSelect.addEventListener('change', () => selectClass(elements.studentClassSelect.value));
+elements.addStudentManagerButton.addEventListener('click', addManagedStudent);
+elements.studentManagerNameInput.addEventListener('keydown', (event) => {
+	if (event.key === 'Enter') {
+		event.preventDefault();
+		addManagedStudent();
+	}
+});
 elements.changerClassSelect.addEventListener('change', () => selectClass(elements.changerClassSelect.value));
 elements.shuffleButton.addEventListener('click', shuffleSeats);
 elements.applyLayoutButton.addEventListener('click', applySeatLayout);
